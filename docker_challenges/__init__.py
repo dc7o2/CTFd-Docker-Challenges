@@ -60,6 +60,8 @@ class DockerConfig(db.Model):
     client_key = db.Column("client_key", db.String(3300), index=True)
     repositories = db.Column("repositories", db.String(1024), index=True)
 
+    # owner can be a team or user depending on the ctfd mode
+    owner_id = db.Column("owner_id", db.String(64), index=True, unique=True)
 
 class DockerChallengeTracker(db.Model):
     """
@@ -78,6 +80,7 @@ class DockerChallengeTracker(db.Model):
 
 class DockerConfigForm(BaseForm):
     id = HiddenField()
+    owner_id = SelectField(u'Owner')
     hostname = StringField(
         "Docker Hostname", description="The Hostname/IP and Port of your Docker Server"
     )
@@ -96,31 +99,46 @@ def define_docker_admin(app):
     @admin_docker_config.route("/admin/docker_config", methods=["GET", "POST"])
     @admins_only
     def docker_config():
-        docker = DockerConfig.query.filter_by(id=1).first()
         form = DockerConfigForm()
+
+        if is_teams_mode():
+            owners = Teams.query.all()
+        else:
+            owners = Users.query.all()
+        form.owner_id.choices = [(o.id, o.name) for o in owners]
+
+
         if request.method == "POST":
+            print(vars(request))
+
+            docker = DockerConfig.query.filter_by(owner_id=request.form['owner_id']).first()
             if docker:
                 b = docker
             else:
                 b = DockerConfig()
+
             try:
                 ca_cert = request.files['ca_cert'].stream.read()
             except:
                 print(traceback.print_exc())
                 ca_cert = ''
+
             try:
                 client_cert = request.files['client_cert'].stream.read()
             except:
                 print(traceback.print_exc())
                 client_cert = ''
+
             try:
                 client_key = request.files['client_key'].stream.read()
             except:
                 print(traceback.print_exc())
                 client_key = ''
+
             if len(ca_cert) != 0: b.ca_cert = ca_cert
             if len(client_cert) != 0: b.client_cert = client_cert
             if len(client_key) != 0: b.client_key = client_key
+            b.owner_id = request.form['owner_id']
             b.hostname = request.form['hostname']
             b.tls_enabled = request.form['tls_enabled']
             if b.tls_enabled == "True":
@@ -138,7 +156,11 @@ def define_docker_admin(app):
                 b.repositories = None
             db.session.add(b)
             db.session.commit()
+
+            docker = DockerConfig.query.filter_by(owner_id=request.form['owner_id']).first()
+        else:
             docker = DockerConfig.query.filter_by(id=1).first()
+
         try:
             repos = get_repositories(docker)
         except:
@@ -148,16 +170,41 @@ def define_docker_admin(app):
             form.repositories.choices = [("ERROR", "Failed to Connect to Docker")]
         else:
             form.repositories.choices = [(d, d) for d in repos]
-        dconfig = DockerConfig.query.first()
+
         try:
-            selected_repos = dconfig.repositories
+            selected_repos = docker.repositories
             if selected_repos == None:
                 selected_repos = list()
-        # selected_repos = dconfig.repositories.split(',')
         except:
             print(traceback.print_exc())
             selected_repos = []
-        return render_template("docker_config.html", config=dconfig, form=form, repos=selected_repos)
+
+        docker_configs = DockerConfig.query.all()
+        all_configs = []
+        for owner in owners:
+            source_config = DockerConfig.query.filter_by(owner_id=owner.id).first()
+            config = dict(
+                owner_id = owner.id,
+                hostname = "",
+                tls_enabled = False,
+                ca_cert = "",
+                client_cert = "",
+                client_key = "",
+                repositories = [],
+            )
+            if source_config:
+                config["hostname"] = source_config.hostname,
+                config["tls_enabled"] = source_config.tls_enabled,
+                config["ca_cert"] = source_config.ca_cert,
+                config["client_cert"] = source_config.client_cert,
+                config["client_key"] = source_config.client_key,
+                config["repositories"] = source_config.repositories,
+                
+            all_configs.append(config)
+
+        print(all_configs)
+
+        return render_template("docker_config.html", config=docker, all_configs=all_configs, form=form, repos=selected_repos)
 
     app.register_blueprint(admin_docker_config)
 
@@ -169,7 +216,6 @@ def define_docker_status(app):
     @admin_docker_status.route("/admin/docker_status", methods=["GET", "POST"])
     @admins_only
     def docker_admin():
-        docker_config = DockerConfig.query.filter_by(id=1).first()
         docker_tracker = DockerChallengeTracker.query.all()
         for i in docker_tracker:
             if is_teams_mode():

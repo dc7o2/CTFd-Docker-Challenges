@@ -16,43 +16,62 @@
             </div>
             {% endfor %}
             <form method="post" accept-charset="utf-8" autocomplete="off" role="form" name='docker_config' class="form-horizontal" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label for="hostname-input">
+								<div class="form-group">
+                    <label for="owner">
+                        Owner
+                    </label>
+										<select name="owner_id" id="owner" onChange="updateForm(this)">
+                        {% for key, value, checked in form.owner_id.iter_choices() %}
+												<!-- {{ key }} -> {{ config["owner_id"] }} -->
+												{% if key == config["owner_id"] %}
+				                    <option value="{{ key }}" selected>{{ value }}</option>
+												{% else %}
+				                    <option value="{{ key }}">{{ value }}</option>
+												{% endif %}
+												{% endfor %}
+								    </select>
+                </div>
+								<div class="form-group">
+                    <label for="hostname">
                         Hostname
                     </label>
                     {% if config.hostname %}
-                    <input class="form-control" type="text" name="hostname" id="hostname-input" placeholder="Ex: 10.10.10.10:2376" value='{{ config.hostname }}'/>
+                    <input class="form-control" type="text" name="hostname" id="hostname" placeholder="Ex: 10.10.10.10:2376" value='{{ config.hostname }}'/>
                     {% else %}
-                    <input class="form-control" type="text" name="hostname" id="hostname-input" placeholder="Ex: 10.10.10.10:2376" />
+                    <input class="form-control" type="text" name="hostname" id="hostname" placeholder="Ex: 10.10.10.10:2376" />
                     {% endif %}
                 </div>
                 <div class="form-group">
-                    <p>TLS Enabled?</p>
-                    <input type="radio" name="tls_enabled" id="tls-radiobox-no" value="False" onclick="enable_file_form(!this.checked)" {% if not config.tls_enabled %}checked{% endif %} />
-                    <label for="tls-radiobox-no">No</label>
-                    <input type="radio" name="tls_enabled" id="tls-radiobox-yes" value="True" onclick="enable_file_form(this.checked)"{% if config.tls_enabled %}checked{% endif %} />
-                    <label for="tls-radiobox-yes">Yes</label>
+                    <label for="tls-radiobox">
+                        TLS Enabled?
+                    </label>
+                    <input type="radio" name="tls_enabled" id="tls-radiobox" value="False" onclick="enable_file_form(!this.checked)" {% if not config.tls_enabled %}checked{% endif %} />
+                    <label for="tls-radiobox">No</label>
+                    <input type="radio" name="tls_enabled" id="tls-radiobox" value="True" onclick="enable_file_form(this.checked)"{% if config.tls_enabled %}checked{% endif %} />
+                    <label for="tls-radiobox">Yes</label>
                 </div>
+								<p>Files must be uploaded everytime or else they get set to empty!</p>
                 <div class="form-group">
-                    <label for="ca-file">
-                        CA Cert {% if config.ca_cert %} (Uploaded. Adding a new file will overwrite.) {% endif %}
+                    <label for="ca_file">
+                        CA Cert
                     </label>
                     <input class="form-control" type="file" name="ca_cert" id="ca_file" {% if not config.tls_enabled %} disabled {% endif %} {% if config.tls_enabled and not config.ca_cert %} required {% endif %} />
                 </div>
                 <div class="form-group">
-                    <label for="client-file">
-                        Client Cert {% if config.client_cert %} (Uploaded. Adding a new file will overwrite.) {% endif %}
+                    <label for="client_file">
+                        Client Cert
                     </label>
                     <input class="form-control" type="file" name="client_cert" id="client_file" {% if not config.tls_enabled %} disabled {% endif %} {% if config.tls_enabled and not config.client_cert %} required {% endif %} />
                 </div>
                 <div class="form-group">
-                    <label for="key-file">
-                        Client Key {% if config.client_key %} (Uploaded. Adding a new file will overwrite.) {% endif %}
+                    <label for="key_file">
+                        Client Key
                     </label>
                     <input class="form-control" type="file" name="client_key" id="key_file" {% if not config.tls_enabled %} disabled {% endif %} {% if config.tls_enabled and not config.client_key %} required {% endif %} />
                 </div>
+								<!--
                 <div class="form-group">
-                    <label for="repo-ms">
+                    <label for="repositories">
                         Repositories
                     </label>
                     <select id='repositories' name="repositories" class='form-control' size='10' multiple>
@@ -71,6 +90,7 @@
                         {% endif %}
                     </select>
                 </div>
+								-->
                 {{ form.nonce() }}
                 <div class="col-md-13 text-center">
                     <button type="submit" tabindex="0" class="btn btn-md btn-primary btn-outlined">
@@ -87,7 +107,7 @@
 <script>
 
 function enable_file_form(status) {
-    status=!status; 
+    status=!status;
     document.docker_config.ca_file.disabled = status;
     document.docker_config.client_file.disabled = status;
     document.docker_config.key_file.disabled = status;
@@ -96,5 +116,20 @@ function enable_file_form(status) {
     document.docker_config.key_file.required = !status;
 }
 
+const configs = {{ all_configs | tojson | safe }};
+function updateForm(selection) {
+		const owner_id = parseInt(selection.value, 10);
+    const config = configs.find(x => x.owner_id === owner_id);
+    const form = selection.parentElement.parentElement;
+
+    form.querySelector("#hostname").value = config.hostname[0] || "";
+
+    const tls_enabled = config.tls_enabled.length && config.tls_enabled[0]
+    enable_file_form(tls_enabled);
+    form.querySelectorAll("#tls-radiobox").forEach(s => {
+				if (s.value === "True") s.checked = tls_enabled;
+				else s.checked = !tls_enabled;
+		})
+}
 </script>
 {% endblock scripts %}
