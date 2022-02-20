@@ -178,7 +178,7 @@ def define_docker_admin(app):
 
         try:
             repos = get_repositories(docker)
-        finally:
+        except AttributeError:
             print(traceback.print_exc())
             repos = list()
         if len(repos) == 0:
@@ -192,7 +192,7 @@ def define_docker_admin(app):
             selected_repos = docker.repositories
             if selected_repos is None:
                 selected_repos = list()
-        finally:
+        except AttributeError:
             print(traceback.print_exc())
             selected_repos = []
 
@@ -211,16 +211,14 @@ def define_docker_admin(app):
                 repositories=[],
             )
             if source_config:
-                config["hostname"] = (source_config.hostname,)
-                config["tls_enabled"] = (source_config.tls_enabled,)
-                config["ca_cert"] = (source_config.ca_cert,)
-                config["client_cert"] = (source_config.client_cert,)
-                config["client_key"] = (source_config.client_key,)
-                config["repositories"] = (source_config.repositories,)
+                config["hostname"] = source_config.hostname
+                config["tls_enabled"] = source_config.tls_enabled
+                config["ca_cert"] = source_config.ca_cert
+                config["client_cert"] = source_config.client_cert
+                config["client_key"] = source_config.client_key
+                config["repositories"] = source_config.repositories
 
             all_configs.append(config)
-
-        print(all_configs)
 
         return render_template(
             "docker_config.html",
@@ -247,11 +245,11 @@ def define_docker_status(app):
         docker_tracker = DockerChallengeTracker.query.all()
         for i in docker_tracker:
             if is_teams_mode():
-                name = Teams.query.filter_by(id=i.team_id).first()
-                i.team_id = name.name
+                team = Teams.query.filter_by(id=i.team_id).first()
+                i.team_id = team.name
             else:
-                name = Users.query.filter_by(id=i.user_id).first()
-                i.user_id = name.name
+                user = Users.query.filter_by(id=i.user_id).first()
+                i.user_id = user.name
         return render_template(
             "admin_docker_status.html",
             dockers=docker_tracker,
@@ -268,12 +266,23 @@ class KillContainerAPI(Resource):
     @admins_only
     def get(self):
         container = request.args.get("container")
+        owner_id = request.args.get("owner_id")
         full = request.args.get("all")
-        docker_config = DockerConfig.query.filter_by(id=1).first()
         docker_tracker = DockerChallengeTracker.query.all()
+
         if full == "true":
+            if is_teams_mode():
+                owner_field = "team_id"
+            else:
+                owner_field = "user_id"
+
+            docker_configs = DockerConfig.query.all()
             for c in docker_tracker:
-                delete_container(docker_config, c.instance_id)
+                owner_id = c[owner_field]
+                delete_container(
+                    next(d for d in docker_configs if d.owner_id == owner_id),
+                    c.instance_id,
+                )
                 DockerChallengeTracker.query.filter_by(
                     instance_id=c.instance_id
                 ).delete()
@@ -282,6 +291,9 @@ class KillContainerAPI(Resource):
         elif container != "null" and container in [
             c.instance_id for c in docker_tracker
         ]:
+            docker_config = DockerConfig.query.filter_by(
+                owner_id=owner_id,
+            )
             delete_container(docker_config, container)
             DockerChallengeTracker.query.filter_by(
                 instance_id=container,
@@ -615,7 +627,6 @@ class DockerChallengeType(BaseChallenge):
         """
         data = request.form or request.get_json()
         submission = data["submission"].strip()
-        docker = DockerConfig.query.filter_by(id=1).first()
         try:
             if is_teams_mode():
                 docker_containers = (
@@ -625,6 +636,7 @@ class DockerChallengeType(BaseChallenge):
                     .filter_by(team_id=team.id)
                     .first()
                 )
+                owner_id = team.id
             else:
                 docker_containers = (
                     DockerChallengeTracker.query.filter_by(
@@ -633,6 +645,8 @@ class DockerChallengeType(BaseChallenge):
                     .filter_by(user_id=user.id)
                     .first()
                 )
+                owner_id = user.id
+            docker = DockerConfig.query.filter_by(owner_id=owner_id).first()
             delete_container(docker, docker_containers.instance_id)
             DockerChallengeTracker.query.filter_by(
                 instance_id=docker_containers.instance_id
@@ -695,13 +709,18 @@ class ContainerAPI(Resource):
         container = request.args.get("name")
         if not container:
             return abort(403)
-        docker = DockerConfig.query.filter_by(id=1).first()
+
+        if is_teams_mode():
+            session = get_current_team()
+        else:
+            session = get_current_user()
+        docker = DockerConfig.query.filter_by(owner_id=session.id).first()
+
         containers = DockerChallengeTracker.query.all()
         if container not in get_repositories(docker, tags=True):
             return abort(403)
         now = unix_time(datetime.utcnow())
         if is_teams_mode():
-            session = get_current_team()
             # First we'll delete all old docker containers (+2 hours)
             for i in containers:
                 if (
@@ -719,7 +738,6 @@ class ContainerAPI(Resource):
                 .first()
             )
         else:
-            session = get_current_user()
             for i in containers:
                 if (
                     int(session.id) == int(i.user_id)
@@ -784,7 +802,6 @@ class DockerStatus(Resource):
 
     @authed_only
     def get(self):
-        docker = DockerConfig.query.filter_by(id=1).first()
         if is_teams_mode():
             session = get_current_team()
             tracker = DockerChallengeTracker.query.filter_by(
@@ -795,6 +812,7 @@ class DockerStatus(Resource):
             tracker = DockerChallengeTracker.query.filter_by(
                 user_id=session.id,
             )
+        docker = DockerConfig.query.filter_by(owner_id=session.id).first()
         data = list()
         for i in tracker:
             data.append(
@@ -828,6 +846,7 @@ class DockerAPI(Resource):
 
     @admins_only
     def get(self):
+        # All docker hosts should have the same images so just use whichever
         docker = DockerConfig.query.filter_by(id=1).first()
         images = get_repositories(docker, tags=True, repos=docker.repositories)
         if images:
