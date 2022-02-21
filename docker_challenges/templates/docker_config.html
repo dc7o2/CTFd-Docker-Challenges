@@ -70,7 +70,6 @@
                     </label>
                     <input class="form-control" type="file" name="client_key" id="key_file" {% if not config.tls_enabled %} disabled {% endif %} {% if config.tls_enabled and not config.client_key %} required {% endif %} />
                 </div>
-								<!--
                 <div class="form-group">
                     <label for="repositories">
                         Repositories
@@ -91,7 +90,6 @@
                         {% endif %}
                     </select>
                 </div>
-								-->
                 {{ form.nonce() }}
                 <div class="col-md-13 text-center">
                     <button type="submit" tabindex="0" class="btn btn-md btn-primary btn-outlined">

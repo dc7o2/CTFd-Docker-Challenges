@@ -127,46 +127,22 @@ def define_docker_admin(app):
             else:
                 b = DockerConfig()
 
-            try:
-                ca_cert = request.files["ca_cert"].stream.read()
-            finally:
-                ca_cert = ""
-
-            try:
-                client_cert = request.files["client_cert"].stream.read()
-            finally:
-                client_cert = ""
-
-            try:
-                client_key = request.files["client_key"].stream.read()
-            finally:
-                print(traceback.print_exc())
-                client_key = ""
-
-            if len(ca_cert) != 0:
-                b.ca_cert = ca_cert
-            if len(client_cert) != 0:
-                b.client_cert = client_cert
-            if len(client_key) != 0:
-                b.client_key = client_key
             b.owner_id = request.form["owner_id"]
             b.hostname = request.form["hostname"]
-            b.tls_enabled = request.form["tls_enabled"]
-            if b.tls_enabled == "True":
-                b.tls_enabled = True
-            else:
-                b.tls_enabled = False
+
+            b.ca_cert = request.files["ca_cert"].stream.read()
+            b.client_cert = request.files["client_cert"].stream.read()
+            b.client_key = request.files["client_key"].stream.read()
+            b.tls_enabled = request.form["tls_enabled"] == "True"
             if not b.tls_enabled:
                 b.ca_cert = None
                 b.client_cert = None
                 b.client_key = None
-            try:
-                b.repositories = ",".join(
-                    request.form.to_dict(flat=False)["repositories"]
-                )
-            finally:
-                print(traceback.print_exc())
-                b.repositories = None
+
+            b.repositories = ",".join(
+                request.form.to_dict(flat=False)["repositories"],
+            )
+
             db.session.add(b)
             db.session.commit()
 
@@ -178,7 +154,7 @@ def define_docker_admin(app):
 
         try:
             repos = get_repositories(docker)
-        except AttributeError:
+        except:
             print(traceback.print_exc())
             repos = list()
         if len(repos) == 0:
@@ -188,13 +164,9 @@ def define_docker_admin(app):
         else:
             form.repositories.choices = [(d, d) for d in repos]
 
-        try:
-            selected_repos = docker.repositories
-            if selected_repos is None:
-                selected_repos = list()
-        except AttributeError:
-            print(traceback.print_exc())
-            selected_repos = []
+        selected_repos = docker.repositories
+        if selected_repos is None:
+            selected_repos = list()
 
         all_configs = []
         for owner in owners:
@@ -247,9 +219,11 @@ def define_docker_status(app):
             if is_teams_mode():
                 team = Teams.query.filter_by(id=i.team_id).first()
                 i.team_id = team.name
+                i.owner_id = team.id
             else:
                 user = Users.query.filter_by(id=i.user_id).first()
                 i.user_id = user.name
+                i.owner_id = user.id
         return render_template(
             "admin_docker_status.html",
             dockers=docker_tracker,
@@ -271,14 +245,12 @@ class KillContainerAPI(Resource):
         docker_tracker = DockerChallengeTracker.query.all()
 
         if full == "true":
-            if is_teams_mode():
-                owner_field = "team_id"
-            else:
-                owner_field = "user_id"
-
             docker_configs = DockerConfig.query.all()
             for c in docker_tracker:
-                owner_id = c[owner_field]
+                if is_teams_mode():
+                    owner_id = c.team_id
+                else:
+                    owner_id = c.user_id
                 delete_container(
                     next(d for d in docker_configs if d.owner_id == owner_id),
                     c.instance_id,
@@ -293,7 +265,7 @@ class KillContainerAPI(Resource):
         ]:
             docker_config = DockerConfig.query.filter_by(
                 owner_id=owner_id,
-            )
+            ).first()
             delete_container(docker_config, container)
             DockerChallengeTracker.query.filter_by(
                 instance_id=container,
@@ -305,63 +277,50 @@ class KillContainerAPI(Resource):
         return True
 
 
-def do_request(docker, url, headers=None, method="GET"):
+def do_request(docker, url, headers=None, method="GET", data=None):
     tls = docker.tls_enabled
     prefix = "https" if tls else "http"
     host = docker.hostname
     URL_TEMPLATE = "%s://%s" % (prefix, host)
-    try:
-        if tls:
-            if method == "GET":
-                r = requests.get(
-                    url=f"%s{url}" % URL_TEMPLATE,
-                    cert=get_client_cert(docker),
-                    verify=False,
-                    headers=headers,
-                )
-            elif method == "DELETE":
-                r = requests.delete(
-                    url=f"%s{url}" % URL_TEMPLATE,
-                    cert=get_client_cert(docker),
-                    verify=False,
-                    headers=headers,
-                )
-        else:
-            if method == "GET":
-                r = requests.get(
-                    url=f"%s{url}" % URL_TEMPLATE,
-                    headers=headers,
-                )
-            elif method == "DELETE":
-                r = requests.delete(
-                    url=f"%s{url}" % URL_TEMPLATE,
-                    headers=headers,
-                )
-    finally:
-        print(traceback.print_exc())
-        r = []
-    return r
+    r = []
+    args = {
+        "headers": headers,
+        "url": f"%s{url}" % URL_TEMPLATE,
+    }
 
+    if method == "POST":
+        args["data"] = data
 
-def get_client_cert(docker):
-    try:
+    handles = []
+    if tls:
         ca = docker.ca_cert
         client = docker.client_cert
         ckey = docker.client_key
-        ca_file = tempfile.NamedTemporaryFile(delete=False)
+        ca_file = tempfile.NamedTemporaryFile()
         ca_file.write(bytes(ca, "utf-8"))
         ca_file.seek(0)
-        client_file = tempfile.NamedTemporaryFile(delete=False)
+        client_file = tempfile.NamedTemporaryFile()
         client_file.write(bytes(client, "utf-8"))
         client_file.seek(0)
-        key_file = tempfile.NamedTemporaryFile(delete=False)
+        key_file = tempfile.NamedTemporaryFile()
         key_file.write(bytes(ckey, "utf-8"))
         key_file.seek(0)
-        CERT = (client_file.name, key_file.name)
-    finally:
-        print(traceback.print_exc())
-        CERT = None
-    return CERT
+        args["cert"] = (client_file.name, key_file.name)
+        args["verify"] = ca_file.name
+        handles = [ca_file, client_file, key_file]
+
+    if method == "GET":
+        r = requests.get(**args)
+    elif method == "DELETE":
+        r = requests.delete(**args)
+    elif method == "POST":
+        r = requests.post(**args)
+
+    # close files so tempfile can clean them up
+    for x in handles:
+        x.close()
+
+    return r
 
 
 # For the Docker Config Page. Gets the available repositories on the server.
@@ -398,31 +357,6 @@ def get_required_ports(docker, image):
 
 
 def create_container(docker, image, team, portbl):
-    tls = docker.tls_enabled
-    CERT = None
-    if not tls:
-        prefix = "http"
-    else:
-        prefix = "https"
-        try:
-            ca = docker.ca_cert
-            client = docker.client_cert
-            ckey = docker.client_key
-            ca_file = tempfile.NamedTemporaryFile(delete=False)
-            ca_file.write(bytes(ca, "utf-8"))
-            ca_file.seek(0)
-            client_file = tempfile.NamedTemporaryFile(delete=False)
-            client_file.write(bytes(client, "utf-8"))
-            client_file.seek(0)
-            key_file = tempfile.NamedTemporaryFile(delete=False)
-            key_file.write(bytes(ckey, "utf-8"))
-            key_file.seek(0)
-            CERT = (client_file.name, key_file.name)
-        finally:
-            print(traceback.print_exc())
-            return []
-    host = docker.hostname
-    URL_TEMPLATE = "%s://%s" % (prefix, host)
     needed_ports = get_required_ports(docker, image)
     team = hashlib.md5(team.encode("utf-8")).hexdigest()[:10]
     container_name = "%s_%s" % (image.split(":")[1], team)
@@ -447,35 +381,21 @@ def create_container(docker, image, team, portbl):
             "HostConfig": {"PortBindings": bindings},
         }
     )
-    if tls:
-        r = requests.post(
-            url=f"{URL_TEMPLATE}/containers/create?name={container_name}",
-            cert=CERT,
-            verify=False,
-            data=data,
-            headers=headers,
-        )
-        result = r.json()
-        requests.post(
-            url=f"{URL_TEMPLATE}/containers/{result['Id']}/start",
-            cert=CERT,
-            verify=False,
-            headers=headers,
-        )
-    else:
-        r = requests.post(
-            url=f"{URL_TEMPLATE}/containers/create?name={container_name}",
-            data=data,
-            headers=headers,
-        )
-        print(r.request.method, r.request.url, r.request.body)
-        result = r.json()
-        print(result)
-        # name conflicts are not handled properly
-        requests.post(
-            url=f"{URL_TEMPLATE}/containers/{result['Id']}/start",
-            headers=headers,
-        )
+    r = do_request(
+        docker,
+        f"/containers/create?name={container_name}",
+        headers,
+        "POST",
+        data,
+    )
+    result = r.json()
+    r = do_request(
+        docker,
+        f"/containers/{result['Id']}/start",
+        headers,
+        "POST",
+    )
+
     return result, data
 
 
@@ -627,32 +547,30 @@ class DockerChallengeType(BaseChallenge):
         """
         data = request.form or request.get_json()
         submission = data["submission"].strip()
-        try:
-            if is_teams_mode():
-                docker_containers = (
-                    DockerChallengeTracker.query.filter_by(
-                        docker_image=challenge.docker_image
-                    )
-                    .filter_by(team_id=team.id)
-                    .first()
+        if is_teams_mode():
+            docker_containers = (
+                DockerChallengeTracker.query.filter_by(
+                    docker_image=challenge.docker_image
                 )
-                owner_id = team.id
-            else:
-                docker_containers = (
-                    DockerChallengeTracker.query.filter_by(
-                        docker_image=challenge.docker_image
-                    )
-                    .filter_by(user_id=user.id)
-                    .first()
+                .filter_by(team_id=team.id)
+                .first()
+            )
+            owner_id = team.id
+        else:
+            docker_containers = (
+                DockerChallengeTracker.query.filter_by(
+                    docker_image=challenge.docker_image
                 )
-                owner_id = user.id
-            docker = DockerConfig.query.filter_by(owner_id=owner_id).first()
-            delete_container(docker, docker_containers.instance_id)
-            DockerChallengeTracker.query.filter_by(
-                instance_id=docker_containers.instance_id
-            ).delete()
-        finally:
-            pass
+                .filter_by(user_id=user.id)
+                .first()
+            )
+            owner_id = user.id
+        docker = DockerConfig.query.filter_by(owner_id=owner_id).first()
+        delete_container(docker, docker_containers.instance_id)
+        DockerChallengeTracker.query.filter_by(
+            instance_id=docker_containers.instance_id
+        ).delete()
+
         solve = Solves(
             user_id=user.id,
             team_id=team.id if team else None,
@@ -754,7 +672,7 @@ class ContainerAPI(Resource):
                 .first()
             )
         # If this container is already created, we don't need another one.
-        if check is None and not (now - int(check.timestamp)) >= 300:
+        if check is not None and not (now - int(check.timestamp)) >= 300:
             return abort(403)
         # The exception would be if we are reverting a box. So we'll delete it
         # if it exists and has been around for more than 5 minutes.

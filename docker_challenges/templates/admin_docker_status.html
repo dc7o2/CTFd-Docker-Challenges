@@ -119,7 +119,7 @@ function nuke_container(owner, instance, all) {
             });
         }
     };
-    xhttp.open("GET", `/api/v1/nuke?owner=${owner}&container=${instance}&all=${all}`, true);
+    xhttp.open("GET", `/api/v1/nuke?owner_id=${owner}&container=${instance}&all=${all}`, true);
     xhttp.send();
 }
 </script>
