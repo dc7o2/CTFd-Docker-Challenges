@@ -117,8 +117,6 @@ def define_docker_admin(app):
         form.owner_id.choices = [(o.id, o.name) for o in owners]
 
         if request.method == "POST":
-            print(vars(request))
-
             docker = DockerConfig.query.filter_by(
                 owner_id=request.form["owner_id"]
             ).first()
@@ -151,6 +149,8 @@ def define_docker_admin(app):
             ).first()
         else:
             docker = DockerConfig.query.filter_by(id=1).first()
+            if docker is None:
+                docker = DockerConfig()
 
         try:
             repos = get_repositories(docker)
