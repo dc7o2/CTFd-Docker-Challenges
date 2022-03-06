@@ -154,7 +154,7 @@ def define_docker_admin(app):
 
         try:
             repos = get_repositories(docker)
-        except:
+        except Exception:
             print(traceback.print_exc())
             repos = list()
         if len(repos) == 0:
