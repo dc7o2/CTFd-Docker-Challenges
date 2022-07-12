@@ -296,14 +296,16 @@ def do_request(docker, url, headers=None, method="GET", data=None):
         ca = docker.ca_cert
         client = docker.client_cert
         ckey = docker.client_key
-        ca_file = tempfile.NamedTemporaryFile()
-        ca_file.write(bytes(ca, "utf-8"))
+
+        ca_file = tempfile.NamedTemporaryFile(delete=False)
+        ca_file.write(ca)
         ca_file.seek(0)
-        client_file = tempfile.NamedTemporaryFile()
-        client_file.write(bytes(client, "utf-8"))
+        client_file = tempfile.NamedTemporaryFile(delete=False)
+        client_file.write(client)
         client_file.seek(0)
-        key_file = tempfile.NamedTemporaryFile()
-        key_file.write(bytes(ckey, "utf-8"))
+        key_file = tempfile.NamedTemporaryFile(delete=False)
+        key_file.write(ckey)
+        
         key_file.seek(0)
         args["cert"] = (client_file.name, key_file.name)
         args["verify"] = ca_file.name
@@ -357,9 +359,35 @@ def get_required_ports(docker, image):
 
 
 def create_container(docker, image, team, portbl):
+    tls = docker.tls_enabled
+    CERT = None
+    if not tls:
+        prefix = 'http'
+    else:
+        prefix = 'https'
+        try:
+            ca = docker.ca_cert
+            client = docker.client_cert
+            ckey = docker.client_key
+            ca_file = tempfile.NamedTemporaryFile(delete=False)
+            ca_file.write(ca)
+            ca_file.seek(0)
+            client_file = tempfile.NamedTemporaryFile(delete=False)
+            client_file.write(client)
+            client_file.seek(0)
+            key_file = tempfile.NamedTemporaryFile(delete=False)
+            key_file.write(ckey)
+            key_file.seek(0)
+            CERT = (client_file.name, key_file.name)
+        except:
+            print(traceback.print_exc())
+            return []
+    host = docker.hostname
+    URL_TEMPLATE = '%s://%s' % (prefix, host)
+
     needed_ports = get_required_ports(docker, image)
     team = hashlib.md5(team.encode("utf-8")).hexdigest()[:10]
-    container_name = "%s_%s" % (image.split(":")[1], team)
+    container_name = "%s_%s" % (image.split(":")[0], team)
     assigned_ports = dict()
     for i in needed_ports:
         while True:
@@ -466,8 +494,8 @@ class DockerChallengeType(BaseChallenge):
         ChallengeFiles.query.filter_by(challenge_id=challenge.id).delete()
         Tags.query.filter_by(challenge_id=challenge.id).delete()
         Hints.query.filter_by(challenge_id=challenge.id).delete()
-        Challenges.query.filter_by(id=challenge.id).delete()
         DockerChallenge.query.filter_by(id=challenge.id).delete()
+        Challenges.query.filter_by(id=challenge.id).delete()
         db.session.commit()
 
     @staticmethod
