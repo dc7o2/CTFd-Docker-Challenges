@@ -3,6 +3,7 @@
 <div class="jumbotron">
     <div class="container">
         <h1>Docker Status</h1>
+        <a href="./docker_config">Config</a>
     </div>
 </div>
 <div class="container">
@@ -37,13 +38,13 @@
                         {% endif %}
                         <td class='text-center' value='{{docker.docker_image}}'>{{docker.docker_image}}</td>
                         <td class='text-center' value='{{docker.instance_id | truncate(15)}}'>{{docker.instance_id | truncate(15)}}</td>
-                        <td class='text-center'><a id="delete_{{docker.instance_id}}" style="cursor: pointer;" class="fas fa-trash" onclick="check_nuke_container('{{docker.instance_id}}', false)"></a></td>
+                        <td class='text-center'><a id="delete_{{docker.instance_id}}" style="cursor: pointer;" class="fas fa-trash" onclick="check_nuke_container('{{docker.owner_id}}', '{{docker.instance_id}}', false)"></a></td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             <div class='text-center'>
-                <button type="button" class="btn btn-danger" onclick="check_nuke_container(null, true)">Nuke All Containers</button>
+                <button type="button" class="btn btn-danger" onclick="check_nuke_container('*', null, true)">Nuke All Containers</button>
             </div>
             {% else %}
             <h3 class='text-center'> No Docker Containers Active</h3>
@@ -92,15 +93,15 @@ function sortTable(n) {
 }
 </script>
 <script>
-function check_nuke_container(instance, all) {
+function check_nuke_container(owner, instance, all) {
     ezq({
         title: "Attention!",
         body: "Are You Sure You want to do this?",
-        success: function() { nuke_container(instance, all) },
+        success: function() { nuke_container(owner, instance, all) },
     });
 }
 
-function nuke_container(instance, all) {
+function nuke_container(owner, instance, all) {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
         if (this.readyState == 4 && this.status == 200) {
@@ -118,7 +119,7 @@ function nuke_container(instance, all) {
             });
         }
     };
-    xhttp.open("GET", "/api/v1/nuke?container=" + instance + "&all=" + all, true);
+    xhttp.open("GET", `/api/v1/nuke?owner_id=${owner}&container=${instance}&all=${all}`, true);
     xhttp.send();
 }
 </script>
